@@ -12,6 +12,7 @@ export default function App() {
   const [wakeWordEnabled, setWakeWordEnabled] = useState(true);
   const [hasServerKey, setHasServerKey] = useState(false);
   const [userApiKey, setUserApiKey] = useState('');
+  const [googleAuth, setGoogleAuth] = useState({ isAuthenticated: false, user: null });
   const peerConnection = useRef(null);
   const audioElement = useRef(null);
 
@@ -216,6 +217,26 @@ export default function App() {
     }
   }, [userApiKey]);
 
+  // Check Google auth status
+  useEffect(() => {
+    fetch('/auth/status')
+      .then(res => res.json())
+      .then(data => setGoogleAuth(data))
+      .catch(error => console.error('Failed to check Google auth status:', error));
+  }, []);
+
+  // Handle Google logout
+  const handleGoogleLogout = async () => {
+    try {
+      const response = await fetch('/auth/logout', { method: 'POST' });
+      if (response.ok) {
+        setGoogleAuth({ isAuthenticated: false, user: null });
+      }
+    } catch (error) {
+      console.error('Logout failed:', error);
+    }
+  };
+
   async function startSession() {
     // Get an ephemeral key from the Fastify server
     const headers = {
@@ -380,6 +401,26 @@ export default function App() {
               </button>
             )}
           </div>
+          {googleAuth.isAuthenticated ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600">
+                {googleAuth.user?.email}
+              </span>
+              <button
+                onClick={handleGoogleLogout}
+                className="px-4 py-2 text-sm bg-red-500 hover:bg-red-600 text-white rounded"
+              >
+                Disconnect Google
+              </button>
+            </div>
+          ) : (
+            <a
+              href="/auth/google"
+              className="px-4 py-2 text-sm bg-blue-500 hover:bg-blue-600 text-white rounded"
+            >
+              Connect Google
+            </a>
+          )}
           <button
             onClick={toggleWakeWord}
             className={`px-4 py-2 rounded ${

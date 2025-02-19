@@ -3,11 +3,32 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import open from "open";
 import "dotenv/config";
+import { OAuth2Client } from "google-auth-library";
+import session from "express-session";
 
 const app = express();
 const port = process.env.PORT || 3000;
 const apiKey = process.env.OPENAI_API_KEY;
 const porcupineKey = process.env.PORCUPINE_ACCESS_KEY;
+
+// Session configuration
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'your-secret-key',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
+
+// Google OAuth setup
+const oauth2Client = new OAuth2Client(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  process.env.GOOGLE_REDIRECT_URI
+);
 
 // Configure Vite middleware for React client
 const vite = await createViteServer({
@@ -70,6 +91,103 @@ app.post("/porcupine/init", async (req, res) => {
     console.error("Porcupine initialization error:", error);
     res.status(500).json({ error: "Failed to initialize Porcupine" });
   }
+});
+
+// Google OAuth routes
+app.get('/auth/google', (req, res) => {
+  // Store the intended destination URL in the session
+  req.session.returnTo = req.query.returnTo || '/';
+  
+  const scopes = [
+    'https://www.googleapis.com/auth/userinfo.profile',
+    'https://www.googleapis.com/auth/userinfo.email',
+    'https://www.googleapis.com/auth/spreadsheets'
+  ];
+
+  const url = oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    scope: scopes,
+    prompt: 'consent'
+  });
+
+  res.redirect(url);
+});
+
+app.get('/auth/google/callback', async (req, res) => {
+  try {
+    const { code } = req.query;
+    const { tokens } = await oauth2Client.getToken(code);
+    
+    // Store tokens in session
+    req.session.tokens = tokens;
+    
+    // Get user info
+    oauth2Client.setCredentials(tokens);
+    const userInfoClient = new OAuth2Client();
+    userInfoClient.setCredentials(tokens);
+    
+    const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` }
+    });
+    const userInfo = await userInfoResponse.json();
+    
+    // Store user info in session
+    req.session.user = userInfo;
+    
+    // Redirect to the stored return URL or default to home
+    const returnTo = req.session.returnTo || '/';
+    delete req.session.returnTo;
+    
+    res.redirect(returnTo);
+  } catch (error) {
+    console.error('OAuth callback error:', error);
+    res.redirect('/?error=auth_failed');
+  }
+});
+
+// Check authentication status
+app.get('/auth/status', (req, res) => {
+  const isAuthenticated = !!req.session.tokens;
+  res.json({ 
+    isAuthenticated,
+    user: req.session.user || null
+  });
+});
+
+// Logout route
+app.post('/auth/logout', (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      console.error('Logout error:', err);
+      res.status(500).json({ error: 'Failed to logout' });
+    } else {
+      res.json({ success: true });
+    }
+  });
+});
+
+// Middleware to refresh token if needed
+app.use(async (req, res, next) => {
+  if (req.session?.tokens) {
+    const tokens = req.session.tokens;
+    
+    // Check if access token is expired or will expire soon
+    const expiryDate = tokens.expiry_date;
+    const isExpired = expiryDate ? Date.now() >= expiryDate : false;
+    
+    if (isExpired && tokens.refresh_token) {
+      try {
+        oauth2Client.setCredentials(tokens);
+        const { credentials } = await oauth2Client.refreshAccessToken();
+        req.session.tokens = credentials;
+      } catch (error) {
+        console.error('Token refresh error:', error);
+        // Clear invalid session
+        req.session.destroy();
+      }
+    }
+  }
+  next();
 });
 
 // Render the React client
