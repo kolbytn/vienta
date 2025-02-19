@@ -16,15 +16,29 @@ const vite = await createViteServer({
 });
 app.use(vite.middlewares);
 
+// API route to check if server has an API key configured
+app.get("/api-key-status", (req, res) => {
+  res.json({ hasServerKey: !!apiKey });
+});
+
 // API route for OpenAI token generation
 app.get("/token", async (req, res) => {
+  // If client provides their own key, don't use server key
+  const useKey = req.headers.authorization?.replace('Bearer ', '') || apiKey;
+  
+  if (!useKey) {
+    return res.status(401).json({ 
+      error: "No API key available. Please provide your own key or contact the administrator." 
+    });
+  }
+
   try {
     const response = await fetch(
       "https://api.openai.com/v1/realtime/sessions",
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${useKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({

@@ -10,6 +10,8 @@ export default function App() {
   const [events, setEvents] = useState([]);
   const [dataChannel, setDataChannel] = useState(null);
   const [wakeWordEnabled, setWakeWordEnabled] = useState(true);
+  const [hasServerKey, setHasServerKey] = useState(false);
+  const [userApiKey, setUserApiKey] = useState('');
   const peerConnection = useRef(null);
   const audioElement = useRef(null);
 
@@ -24,6 +26,14 @@ export default function App() {
     stop: null,
     release: null,
   });
+
+  // Load API key from localStorage on client side
+  useEffect(() => {
+    const savedKey = localStorage.getItem('openai_api_key');
+    if (savedKey) {
+      setUserApiKey(savedKey);
+    }
+  }, []);
 
   // Load Porcupine only on the client side
   useEffect(() => {
@@ -189,9 +199,41 @@ export default function App() {
     }
   };
 
+  // Check if server has API key configured
+  useEffect(() => {
+    fetch("/api-key-status")
+      .then(res => res.json())
+      .then(data => setHasServerKey(data.hasServerKey))
+      .catch(error => console.error("Failed to check server key status:", error));
+  }, []);
+
+  // Save API key to localStorage when it changes
+  useEffect(() => {
+    if (userApiKey) {
+      localStorage.setItem('openai_api_key', userApiKey);
+    } else {
+      localStorage.removeItem('openai_api_key');
+    }
+  }, [userApiKey]);
+
   async function startSession() {
     // Get an ephemeral key from the Fastify server
-    const tokenResponse = await fetch("/token");
+    const headers = {
+      "Content-Type": "application/json"
+    };
+    
+    // Add user's API key if provided
+    if (userApiKey) {
+      headers.Authorization = `Bearer ${userApiKey}`;
+    }
+
+    const tokenResponse = await fetch("/token", { headers });
+    if (!tokenResponse.ok) {
+      const error = await tokenResponse.json();
+      console.error("Failed to start session:", error);
+      alert(error.error || "Failed to start session. Please check your API key.");
+      return;
+    }
     const data = await tokenResponse.json();
     const EPHEMERAL_KEY = data.client_secret.value;
 
@@ -320,9 +362,27 @@ export default function App() {
         <div className="flex items-center gap-4 w-full m-4 pb-2 border-0 border-b border-solid border-gray-200">
           <img style={{ width: "24px" }} src={logo} />
           <h1>realtime console</h1>
+          <div className="flex items-center gap-2 w-64 ml-auto mr-4">
+            <label className="text-sm text-gray-600 whitespace-nowrap">API Key:</label>
+            <input
+              type="password"
+              placeholder="Enter your OpenAI API key"
+              value={userApiKey}
+              onChange={(e) => setUserApiKey(e.target.value)}
+              className="w-full px-3 py-1 border rounded text-sm"
+            />
+            {userApiKey && (
+              <button
+                onClick={() => setUserApiKey('')}
+                className="px-2 py-1 text-sm text-red-600 hover:text-red-700 whitespace-nowrap"
+              >
+                Clear
+              </button>
+            )}
+          </div>
           <button
             onClick={toggleWakeWord}
-            className={`ml-auto px-4 py-2 rounded ${
+            className={`px-4 py-2 rounded ${
               wakeWordEnabled
                 ? "bg-red-500 hover:bg-red-600"
                 : "bg-green-500 hover:bg-green-600"
