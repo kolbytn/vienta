@@ -10,12 +10,11 @@ export default {
   plugins: [react()],
   publicDir: join(dirname(path), "public"),
   build: {
-    outDir: join(dirname(path), "dist"),
+    outDir: join(dirname(path), "dist/client"),
     emptyOutDir: true,
     rollupOptions: {
       input: {
-        client: join(root, "entry-client.jsx"),
-        server: join(root, "entry-server.jsx")
+        main: join(root, "index.html")
       }
     }
   },
